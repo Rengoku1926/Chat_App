@@ -9,17 +9,11 @@ const ProfilePage = () => {
   const handleImageUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
-    const reader = new FileReader();
-
-    reader.readAsDataURL(file);
-
-    reader.onload = async () => {
-      const base64Image = reader.result;
-      setSelectedImg(base64Image);
-      await updateProfile({ profilePic: base64Image });
-    };
+  
+    setSelectedImg(URL.createObjectURL(file)); // Just for preview
+    await updateProfile(file); // Pass the actual file
   };
+  
 
   return (
     <div className="h-screen pt-20">

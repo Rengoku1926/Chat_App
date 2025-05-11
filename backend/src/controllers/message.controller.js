@@ -3,6 +3,7 @@ import Message from "../models/message.model.js";
 
 import cloudinary from "../lib/cloudinary.js";
 import { getReceiverSocketId, io } from "../lib/socket.js";
+import { Readable } from "stream";
 
 export const getUsersForSidebar = async (req, res) => {
   try {
@@ -37,14 +38,29 @@ export const getMessages = async (req, res) => {
 
 export const sendMessage = async (req, res) => {
   try {
-    const { text, image } = req.body;
+    const { text } = req.body;
     const { id: receiverId } = req.params;
     const senderId = req.user._id;
 
     let imageUrl;
-    if (image) {
-      // Upload base64 image to cloudinary
-      const uploadResponse = await cloudinary.uploader.upload(image);
+    if (req.file) {
+      // convert buffer into a readable stream
+      const bufferStream = new Readable();
+      bufferStream.push(req.file.buffer);
+      bufferStream.push(null);
+
+      // upload_stream to Cloudinary
+      const uploadResponse = await new Promise((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          { folder: "chat_images" },
+          (error, result) => {
+            if (error) return reject(error);
+            resolve(result);
+          }
+        );
+        bufferStream.pipe(stream);
+      });
+
       imageUrl = uploadResponse.secure_url;
     }
 
@@ -54,9 +70,9 @@ export const sendMessage = async (req, res) => {
       text,
       image: imageUrl,
     });
-
     await newMessage.save();
 
+    // emit to receiver if online
     const receiverSocketId = getReceiverSocketId(receiverId);
     if (receiverSocketId) {
       io.to(receiverSocketId).emit("newMessage", newMessage);
@@ -64,7 +80,8 @@ export const sendMessage = async (req, res) => {
 
     res.status(201).json(newMessage);
   } catch (error) {
-    console.log("Error in sendMessage controller: ", error.message);
+    console.error("Error in sendMessage controller:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 };
+

@@ -2,6 +2,7 @@ import { generateToken } from "../lib/utils.js";
 import User from "../models/user.model.js";
 import bcrypt from "bcryptjs";
 import cloudinary from "../lib/cloudinary.js";
+import {Readable} from "stream";
 
 export const signup = async (req, res) => {
   const { fullName, email, password } = req.body;
@@ -87,26 +88,55 @@ export const logout = (req, res) => {
 
 export const updateProfile = async (req, res) => {
   try {
-    const { profilePic } = req.body;
-    const userId = req.user._id;
-
-    if (!profilePic) {
-      return res.status(400).json({ message: "Profile pic is required" });
+    console.log(">> updateProfile called, req.file:", req.file);
+    if (!req.file) {
+      return res.status(400).json({ message: "No file uploaded" });
     }
 
-    const uploadResponse = await cloudinary.uploader.upload(profilePic);
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
-      { profilePic: uploadResponse.secure_url },
-      { new: true }
-    );
+    // build a stream
+    let uploadResponse;
+    try {
+      const bufferStream = new Readable();
+      bufferStream.push(req.file.buffer);
+      bufferStream.push(null);
+
+      uploadResponse = await new Promise((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          { folder: "profile_pics" },
+          (error, result) => {
+            if (error) return reject(error);
+            resolve(result);
+          }
+        );
+        bufferStream.pipe(stream);
+      });
+      console.log(">> Cloudinary uploadResponse:", uploadResponse);
+    } catch (err) {
+      console.error("❌ Cloudinary upload failed:", err);
+      return res.status(500).json({ message: "Cloudinary upload error" });
+    }
+
+    // update user
+    let updatedUser;
+    try {
+      updatedUser = await User.findByIdAndUpdate(
+        req.user._id,
+        { profilePic: uploadResponse.secure_url },
+        { new: true }
+      );
+      console.log(">> updatedUser:", updatedUser);
+    } catch (err) {
+      console.error("❌ Mongo update failed:", err);
+      return res.status(500).json({ message: "Database update error" });
+    }
 
     res.status(200).json(updatedUser);
   } catch (error) {
-    console.log("error in update profile:", error);
+    console.error("🔥 Unexpected error in updateProfile:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
 
 export const checkAuth = (req, res) => {
   try {
